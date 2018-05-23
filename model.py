@@ -53,7 +53,7 @@ class DocReader(object):
         elif args.model_type == 'r_net':
             self.network = R_Net(args, normalize)
         elif args.model_type == 'mnemonic':
-            self.network = MnemonicReader(args, normalize)
+            self.network = MnemonicReader(args, normalize, tokens=self.word_dict.tokens())
         else:
             raise RuntimeError('Unsupported model: %s' % args.model_type)
 
@@ -284,16 +284,19 @@ class DocReader(object):
         
         # Transfer to GPU
         if self.use_cuda:
-            inputs = [e if e is None else Variable(e.cuda(async=True)) for e in ex[:-3]]
-            target_s = Variable(ex[-3].cuda(async=True))
-            target_e = Variable(ex[-2].cuda(async=True))
+            inputs = [e if e is None else Variable(e.cuda(async=True)) for e in ex[:-5]]
+            target_s = Variable(ex[-5].cuda(async=True))
+            target_e = Variable(ex[-4].cuda(async=True))
         else:
-            inputs = [e if e is None else Variable(e) for e in ex[:-3]]
-            target_s = Variable(ex[-3])
-            target_e = Variable(ex[-2])
-        
+            inputs = [e if e is None else Variable(e) for e in ex[:-5]]
+            target_s = Variable(ex[-5])
+            target_e = Variable(ex[-4])
+
+        c_texts = ex[-3]
+        q_texts = ex[-2]
+
         # Run forward
-        score_s, score_e = self.network(*inputs)
+        score_s, score_e = self.network(*inputs, c_texts, q_texts)
 
         # Compute loss and accuracies
         loss = F.nll_loss(score_s, target_s) + F.nll_loss(score_e, target_e)
@@ -359,13 +362,16 @@ class DocReader(object):
         if self.use_cuda:
             inputs = [e if e is None else
                       Variable(e.cuda(async=True), volatile=True)
-                      for e in ex[:8]]
+                      for e in ex[:-5]]
         else:
             inputs = [e if e is None else Variable(e, volatile=True)
-                      for e in ex[:8]]
+                      for e in ex[:-5]]
+
+        c_texts = ex[-3]
+        q_texts = ex[-2]
 
         # Run forward
-        score_s, score_e = self.network(*inputs)
+        score_s, score_e = self.network(*inputs, c_texts, q_texts)
         del inputs
 
         # Decode predictions

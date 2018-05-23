@@ -68,6 +68,20 @@ def load_text(filename):
     return texts
 
 
+def load_questions(filename):
+    """Load the answers only of a SQuAD dataset. Store as qid -> [answers]."""
+    # Load JSON file
+    with open(filename) as f:
+        examples = json.load(f)['data']
+
+    qs = []
+    for article in examples:
+        for paragraph in article['paragraphs']:
+            for qa in paragraph['qas']:
+                qs.append(qa['question'])
+    return qs
+
+
 def load_answers(filename):
     """Load the answers only of a SQuAD dataset. Store as qid -> [answers]."""
     # Load JSON file

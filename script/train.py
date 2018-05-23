@@ -8,6 +8,7 @@
 
 import sys
 sys.path.append('.')
+sys.path.append('../allennlp')
 import argparse
 import torch
 import numpy as np
@@ -61,7 +62,7 @@ def add_train_args(parser):
                                'operations (for reproducibility)'))
     runtime.add_argument('--num-epochs', type=int, default=40,
                          help='Train data iterations')
-    runtime.add_argument('--batch-size', type=int, default=45,
+    runtime.add_argument('--batch-size', type=int, default=30,
                          help='Batch size for training')
     runtime.add_argument('--test-batch-size', type=int, default=32,
                          help='Batch size during validation/testing')
@@ -75,12 +76,14 @@ def add_train_args(parser):
     files.add_argument('--data-dir', type=str, default=DATA_DIR,
                        help='Directory of training/validation data')
     files.add_argument('--train-file', type=str,
-                       default='SQuAD-v1.1-train-processed-spacy.txt',
+                       default='SQuAD-train-v1.1-processed-spacy.txt',
                        help='Preprocessed train file')
     files.add_argument('--dev-file', type=str,
-                       default='SQuAD-v1.1-dev-processed-spacy.txt',
+                       default='SQuAD-dev-v1.1-processed-spacy.txt',
                        help='Preprocessed dev file')
-    files.add_argument('--dev-json', type=str, default='SQuAD-v1.1-dev.json',
+    files.add_argument('--train-json', type=str, default='SQuAD-train-v1.1.json',
+                       help=('Unprocessed train file'))
+    files.add_argument('--dev-json', type=str, default='SQuAD-dev-v1.1.json',
                        help=('Unprocessed dev file to run validation '
                              'while training on'))
     files.add_argument('--embed-dir', type=str, default=EMBED_DIR,
@@ -89,7 +92,7 @@ def add_train_args(parser):
                        default='glove.840B.300d.txt',
                        help='Space-separated pretrained embeddings file')
     files.add_argument('--char-embedding-file', type=str,
-                       default='glove.840B.300d-char.txt',
+                       default=None,
                        help='Space-separated pretrained embeddings file')
 
     # Saving + loading
@@ -107,7 +110,7 @@ def add_train_args(parser):
                             help='Question words will be lower-cased')
     preprocess.add_argument('--uncased-doc', type='bool', default=False,
                             help='Document words will be lower-cased')
-    preprocess.add_argument('--restrict-vocab', type='bool', default=True,
+    preprocess.add_argument('--restrict-vocab', type='bool', default=False,
                             help='Only use pre-trained words in embedding_file')
 
     # General
@@ -126,6 +129,7 @@ def set_defaults(args):
     """Make sure the commandline arguments are initialized properly."""
     # Check critical files exist
     args.dev_json = os.path.join(args.data_dir, args.dev_json)
+    args.train_json = os.path.join(args.data_dir, args.train_json)
     if not os.path.isfile(args.dev_json):
         raise IOError('No such file: %s' % args.dev_json)
     args.train_file = os.path.join(args.data_dir, args.train_file)
@@ -274,7 +278,7 @@ def validate_unofficial(args, data_loader, model, global_stats, mode):
     for ex in data_loader:
         batch_size = ex[0].size(0)
         pred_s, pred_e, _ = model.predict(ex)
-        target_s, target_e = ex[-3:-1]
+        target_s, target_e = ex[8:10]
 
         # We get metrics for independent start/end and joint start/end
         accuracies = eval_accuracies(pred_s, target_s, pred_e, target_e)

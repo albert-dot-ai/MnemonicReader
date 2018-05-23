@@ -17,6 +17,8 @@ def vectorize(ex, model, single_answer=False):
     char_dict = model.char_dict
     feature_dict = model.feature_dict
 
+    document_text = ex['document']
+    question_text = ex['question']
     # Index words
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     document_char = torch.LongTensor([char_dict[w] for w in ex['document_char']])
@@ -101,14 +103,14 @@ def vectorize(ex, model, single_answer=False):
         start = [a[0] for a in ex['answers']]
         end = [a[1] for a in ex['answers']]
     
-    return document, document_char, c_features, question, question_char, q_features, start, end, ex['id']
+    return document, document_char, c_features, question, question_char, q_features, start, end, document_text, question_text, ex['id']
 
 
 def batchify(batch):
     """Gather a batch of individual examples into one batch."""
     NUM_INPUTS = 6
     NUM_TARGETS = 2
-    NUM_EXTRA = 1
+    NUM_EXTRA = 3
 
     docs = [ex[0] for ex in batch]
     doc_chars = [ex[1] for ex in batch]
@@ -116,6 +118,8 @@ def batchify(batch):
     questions = [ex[3] for ex in batch]
     question_chars = [ex[4] for ex in batch]
     q_features = [ex[5] for ex in batch]
+    document_texts = [ex[-3] for ex in batch]
+    question_texts = [ex[-2] for ex in batch]
     ids = [ex[-1] for ex in batch]
 
     # Batch documents and features
@@ -154,7 +158,7 @@ def batchify(batch):
 
     # Maybe return without targets
     if len(batch[0]) == NUM_INPUTS + NUM_EXTRA:
-        return x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, ids
+        return x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, document_texts, question_texts, ids
 
     elif len(batch[0]) == NUM_INPUTS + NUM_EXTRA + NUM_TARGETS:
         # ...Otherwise add targets
@@ -167,4 +171,4 @@ def batchify(batch):
     else:
         raise RuntimeError('Incorrect number of inputs per example.')
 
-    return x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, y_s, y_e, ids
+    return x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, y_s, y_e, document_texts, question_texts, ids

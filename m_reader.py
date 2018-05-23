@@ -12,6 +12,11 @@ import torch.nn.functional as F
 import layers
 from torch.autograd import Variable
 
+from allennlp.modules.elmo import Elmo, _ElmoCharacterEncoder, batch_to_ids
+from allennlp.nn.util import add_sentence_boundary_token_ids
+
+options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_options.json"
+weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway/elmo_2x4096_512_2048cnn_2xhighway_weights.hdf5"
 
 # ------------------------------------------------------------------------------
 # Network
@@ -21,7 +26,7 @@ from torch.autograd import Variable
 class MnemonicReader(nn.Module):
     RNN_TYPES = {'lstm': nn.LSTM, 'gru': nn.GRU, 'rnn': nn.RNN}
     CELL_TYPES = {'lstm': nn.LSTMCell, 'gru': nn.GRUCell, 'rnn': nn.RNNCell}
-    def __init__(self, args, normalize=True):
+    def __init__(self, args, normalize=True, tokens=None):
         super(MnemonicReader, self).__init__()
         # Store config
         self.args = args
@@ -48,7 +53,16 @@ class MnemonicReader(nn.Module):
             padding=args.rnn_padding,
         )
 
-        doc_input_size = args.embedding_dim + args.char_hidden_size * 2 + args.num_features
+        # TODO: move this to args
+        self.init_elmo_embeds(tokens)
+
+        elmo_layers = 2
+        elmo_embedding_dim = 1024
+
+        # doc_input_size = args.embedding_dim + args.char_hidden_size * 2 + elmo_embedding_dim * elmo_layers + args.num_features
+        doc_input_size = elmo_embedding_dim * elmo_layers + args.num_features
+
+        self.elmo_embedding = Elmo(options_file, weight_file, elmo_layers, dropout=0)
 
         # Encoder
         self.encoding_rnn = layers.StackedBRNN(
@@ -100,9 +114,34 @@ class MnemonicReader(nn.Module):
             dropout_rate=args.dropout_rnn,
             normalize=normalize
         )
-        
 
-    def forward(self, x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask):
+    def init_elmo_embeds(self, tokens):
+        elmo_char_encoder = _ElmoCharacterEncoder(options_file, weight_file).cuda()
+
+        # Init with 0s for NULL, UNK
+        all_token_embeds = torch.zeros(2, 512).cuda()
+        bos_token_embed = None
+        eos_token_embed = None
+
+        for i in range(0, len(tokens), 1000):
+            token_char_ids = batch_to_ids([tokens[i:min(i+1000, len(tokens))]]).cuda()
+            token_embeds = elmo_char_encoder(token_char_ids)['token_embedding']
+
+            if bos_token_embed is None:
+                bos_token_embed = token_embeds.data[0][0]
+                eos_token_embed = token_embeds.data[0][-1]
+
+            # Strip BOS, EOS embeddings
+            all_token_embeds = torch.cat((all_token_embeds, token_embeds.data[0][1:-1]))
+
+        all_token_embeds = torch.cat((all_token_embeds, bos_token_embed.unsqueeze(0), eos_token_embed.unsqueeze(0)))
+        self.token_embedding_weights = torch.nn.Parameter(
+            all_token_embeds, requires_grad = False,
+        ).cuda()
+        self.bos_id = all_token_embeds.size()[0] - 2
+        self.eos_id = all_token_embeds.size()[0] - 1
+
+    def forward(self, x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, x1_texts, x2_texts):
         """Inputs:
         x1 = document word indices             [batch * len_d]
         x1_c = document char indices           [batch * len_d]
@@ -112,27 +151,70 @@ class MnemonicReader(nn.Module):
         x2_c = document char indices           [batch * len_d]
         x1_f = document word features indices  [batch * len_d * nfeat]
         x2_mask = question padding mask        [batch * len_q]
+        x1_texts = document tokens
+        x2 texts = question tokens
         """
         # Embed both document and question
-        x1_emb = self.embedding(x1)
-        x2_emb = self.embedding(x2)
-        x1_c_emb = self.char_embedding(x1_c)
-        x2_c_emb = self.char_embedding(x2_c)
+        # x1_emb = self.embedding(x1)
+        # x2_emb = self.embedding(x2)
+        # x1_c_emb = self.char_embedding(x1_c)
+        # x2_c_emb = self.char_embedding(x2_c)
+
+        # Embed document and question text using elmo (batch_size, 3, num_timesteps, 1024)
+        x1_with_bos_eos, x1_mask_with_bos_eos = add_sentence_boundary_token_ids(
+            x1,
+            x1_mask,
+            self.bos_id,
+            self.eos_id,
+        )
+        x2_with_bos_eos, x2_mask_with_bos_eos = add_sentence_boundary_token_ids(
+            x2,
+            x2_mask,
+            self.bos_id,
+            self.eos_id,
+        )
+        x1_token_embs = torch.nn.functional.embedding(
+            x1_with_bos_eos,
+            self.token_embedding_weights,
+        )
+        x1_token_embs = {
+            'token_embedding': x1_token_embs,
+            'mask': x1_mask_with_bos_eos,
+        }
+        x2_token_embs = torch.nn.functional.embedding(
+            x2_with_bos_eos,
+            self.token_embedding_weights,
+        )
+        x2_token_embs = {
+            'token_embedding': x2_token_embs,
+            'mask': x2_mask_with_bos_eos,
+        }
+        x1_elmo_embs = self.elmo_embedding(x1_token_embs)['elmo_representations']
+        x2_elmo_embs = self.elmo_embedding(x2_token_embs)['elmo_representations']
 
         # Dropout on embeddings
+        '''
         if self.args.dropout_emb > 0:
             x1_emb = F.dropout(x1_emb, p=self.args.dropout_emb, training=self.training)
             x2_emb = F.dropout(x2_emb, p=self.args.dropout_emb, training=self.training)
             x1_c_emb = F.dropout(x1_c_emb, p=self.args.dropout_emb, training=self.training)
             x2_c_emb = F.dropout(x2_c_emb, p=self.args.dropout_emb, training=self.training)
+        '''
 
         # Generate char features
+        '''
         x1_c_features = self.char_rnn(x1_c_emb, x1_mask)
         x2_c_features = self.char_rnn(x2_c_emb, x2_mask)
+        '''
 
         # Combine input
-        crnn_input = [x1_emb, x1_c_features]
-        qrnn_input = [x2_emb, x2_c_features]
+        '''
+        crnn_input = [x1_emb, *x1_elmo_embs, x1_c_features]
+        qrnn_input = [x2_emb, *x2_elmo_embs, x2_c_features]
+        '''
+        crnn_input = x1_elmo_embs
+        qrnn_input = x2_elmo_embs
+
         # Add manual features
         if self.args.num_features > 0:
             crnn_input.append(x1_f)
@@ -140,7 +222,7 @@ class MnemonicReader(nn.Module):
 
         # Encode document with RNN
         c = self.encoding_rnn(torch.cat(crnn_input, 2), x1_mask)
-        
+
         # Encode question with RNN
         q = self.encoding_rnn(torch.cat(qrnn_input, 2), x2_mask)
 
