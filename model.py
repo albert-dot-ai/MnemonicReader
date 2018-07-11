@@ -292,11 +292,11 @@ class DocReader(object):
             target_s = Variable(ex[-5])
             target_e = Variable(ex[-4])
 
-        c_texts = ex[-3]
-        q_texts = ex[-2]
+        # c_texts = ex[-3]
+        # q_texts = ex[-2]
 
         # Run forward
-        score_s, score_e = self.network(*inputs, c_texts, q_texts)
+        score_s, score_e = self.network(*inputs)
 
         # Compute loss and accuracies
         loss = F.nll_loss(score_s, target_s) + F.nll_loss(score_e, target_e)
@@ -367,11 +367,11 @@ class DocReader(object):
             inputs = [e if e is None else Variable(e, volatile=True)
                       for e in ex[:-5]]
 
-        c_texts = ex[-3]
-        q_texts = ex[-2]
+        # c_texts = ex[-3]
+        # q_texts = ex[-2]
 
         # Run forward
-        score_s, score_e = self.network(*inputs, c_texts, q_texts)
+        score_s, score_e = self.network(*inputs)
         del inputs
 
         # Decode predictions

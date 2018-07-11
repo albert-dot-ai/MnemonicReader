@@ -59,8 +59,8 @@ class MnemonicReader(nn.Module):
         elmo_layers = 2
         elmo_embedding_dim = 1024
 
-        # doc_input_size = args.embedding_dim + args.char_hidden_size * 2 + elmo_embedding_dim * elmo_layers + args.num_features
-        doc_input_size = elmo_embedding_dim * elmo_layers + args.num_features
+        doc_input_size = args.embedding_dim + args.char_hidden_size * 2 + elmo_embedding_dim * elmo_layers + args.num_features
+        # doc_input_size = elmo_embedding_dim * elmo_layers + args.num_features
 
         self.elmo_embedding = Elmo(options_file, weight_file, elmo_layers, dropout=0)
 
@@ -141,7 +141,7 @@ class MnemonicReader(nn.Module):
         self.bos_id = all_token_embeds.size()[0] - 2
         self.eos_id = all_token_embeds.size()[0] - 1
 
-    def forward(self, x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask, x1_texts, x2_texts):
+    def forward(self, x1, x1_c, x1_f, x1_mask, x2, x2_c, x2_f, x2_mask):
         """Inputs:
         x1 = document word indices             [batch * len_d]
         x1_c = document char indices           [batch * len_d]
@@ -151,14 +151,12 @@ class MnemonicReader(nn.Module):
         x2_c = document char indices           [batch * len_d]
         x1_f = document word features indices  [batch * len_d * nfeat]
         x2_mask = question padding mask        [batch * len_q]
-        x1_texts = document tokens
-        x2 texts = question tokens
         """
         # Embed both document and question
-        # x1_emb = self.embedding(x1)
-        # x2_emb = self.embedding(x2)
-        # x1_c_emb = self.char_embedding(x1_c)
-        # x2_c_emb = self.char_embedding(x2_c)
+        x1_emb = self.embedding(x1)
+        x2_emb = self.embedding(x2)
+        x1_c_emb = self.char_embedding(x1_c)
+        x2_c_emb = self.char_embedding(x2_c)
 
         # Embed document and question text using elmo (batch_size, 3, num_timesteps, 1024)
         x1_with_bos_eos, x1_mask_with_bos_eos = add_sentence_boundary_token_ids(
@@ -193,27 +191,21 @@ class MnemonicReader(nn.Module):
         x2_elmo_embs = self.elmo_embedding(x2_token_embs)['elmo_representations']
 
         # Dropout on embeddings
-        '''
         if self.args.dropout_emb > 0:
             x1_emb = F.dropout(x1_emb, p=self.args.dropout_emb, training=self.training)
             x2_emb = F.dropout(x2_emb, p=self.args.dropout_emb, training=self.training)
             x1_c_emb = F.dropout(x1_c_emb, p=self.args.dropout_emb, training=self.training)
             x2_c_emb = F.dropout(x2_c_emb, p=self.args.dropout_emb, training=self.training)
-        '''
 
         # Generate char features
-        '''
         x1_c_features = self.char_rnn(x1_c_emb, x1_mask)
         x2_c_features = self.char_rnn(x2_c_emb, x2_mask)
-        '''
 
         # Combine input
-        '''
         crnn_input = [x1_emb, *x1_elmo_embs, x1_c_features]
         qrnn_input = [x2_emb, *x2_elmo_embs, x2_c_features]
-        '''
-        crnn_input = x1_elmo_embs
-        qrnn_input = x2_elmo_embs
+        # crnn_input = x1_elmo_embs
+        # qrnn_input = x2_elmo_embs
 
         # Add manual features
         if self.args.num_features > 0:

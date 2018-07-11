@@ -17,8 +17,10 @@ def vectorize(ex, model, single_answer=False):
     char_dict = model.char_dict
     feature_dict = model.feature_dict
 
-    document_text = ex['document']
-    question_text = ex['question']
+    # document_text = ex['document']
+    # question_text = ex['question']
+    document_text = None
+    question_text = None
     # Index words
     document = torch.LongTensor([word_dict[w] for w in ex['document']])
     document_char = torch.LongTensor([char_dict[w] for w in ex['document_char']])
@@ -118,9 +120,11 @@ def batchify(batch):
     questions = [ex[3] for ex in batch]
     question_chars = [ex[4] for ex in batch]
     q_features = [ex[5] for ex in batch]
-    document_texts = [ex[-3] for ex in batch]
-    question_texts = [ex[-2] for ex in batch]
+    # document_texts = [ex[-3] for ex in batch]
+    # question_texts = [ex[-2] for ex in batch]
     ids = [ex[-1] for ex in batch]
+    document_texts = None
+    question_texts = None
 
     # Batch documents and features
     max_length = max([d.size(0) for d in docs])
